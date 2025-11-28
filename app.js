@@ -16,49 +16,44 @@ const { requireLogin } = require('./middleware/auth');
 
 const app = express();
 
-// Body parser & static files
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// EJS Layouts
+// EJS
 app.use(expressLayouts);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.set('layout', 'layout');
 
-// Session config
+// Sessions
 app.use(
   session({
     cookieName: 'session',
-    secret: process.env.SESSION_SECRET || 'AnyRandomSecret',
-    duration: 30 * 60 * 1000,
-    activeDuration: 5 * 60 * 1000
+    secret: process.env.SESSION_SECRET || 'RandomSecret',
+    duration: 24 * 60 * 60 * 1000,
+    activeDuration: 2 * 60 * 60 * 1000
   })
 );
 
-// Expose logged-in user to all EJS views
+// Pass logged in user to EJS
 app.use((req, res, next) => {
-  if (req.session && req.session.userId) {
-    res.locals.user = {
-      username: req.session.username,
-      email: req.session.email
-    };
+  if (req.session.user) {
+    res.locals.user = req.session.user; 
   } else {
     res.locals.user = null;
   }
   next();
 });
 
-// Connect MongoDB then load routes
+// Connect MongoDB
 connectMongo()
   .then(() => {
     console.log('MongoDB connected successfully!');
     const User = require('./models/user');
 
-    // -------------------------
-    // AUTH ROUTES
-    // -------------------------
+    // ========== AUTH ROUTES ==========
 
     app.get('/register', (req, res) => {
       res.render('register', { error: null });
@@ -68,47 +63,18 @@ connectMongo()
       const { username, email, password } = req.body;
 
       if (!username || !email || !password) {
-        return res.render('register', { error: 'All fields are required.' });
+        return res.render('register', { error: 'All fields required' });
       }
 
-      if (password.length < 6) {
-        return res.render('register', { error: 'Password must be at least 6 characters.' });
-      }
+      const exists = await User.findOne({ email });
+      if (exists) return res.render('register', { error: 'Email already exists' });
 
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.render('register', { error: 'Invalid email address.' });
-      }
+      const hash = await bcrypt.hash(password, 10);
 
-      try {
-        const existingUser = await User.findOne({
-          $or: [{ email }, { username }]
-        });
+      const user = new User({ username, email, password: hash });
+      await user.save();
 
-        if (existingUser) {
-          return res.render('register', {
-            error: 'Username or Email already exists'
-          });
-        }
-
-        const rounds = parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10);
-        const hashedPassword = await bcrypt.hash(password, rounds);
-
-        const user = new User({ username, email, password: hashedPassword });
-        await user.save();
-
-        res.redirect('/login');
-      } catch (err) {
-        console.error('Registration error:', err);
-
-        if (err.code === 11000) {
-          return res.render('register', {
-            error: 'Username or Email already exists'
-          });
-        }
-
-        res.render('register', { error: 'Registration failed.' });
-      }
+      res.redirect('/login');
     });
 
     app.get('/login', (req, res) => {
@@ -116,30 +82,21 @@ connectMongo()
     });
 
     app.post('/login', async (req, res) => {
-      const { email, password } = req.body;
-
-      if (!email || !password) {
-        return res.render('login', {
-          error: 'Email and password are required'
-        });
-      }
-
       try {
+        const { email, password } = req.body;
+
         const user = await User.findOne({ email });
+        if (!user) return res.render('login', { error: 'Invalid credentials' });
 
-        if (!user) {
-          return res.render('login', { error: 'Invalid credentials' });
-        }
+        const ok = await bcrypt.compare(password, user.password);
+        if (!ok) return res.render('login', { error: 'Invalid credentials' });
 
-        const valid = await bcrypt.compare(password, user.password);
-        if (!valid) {
-          return res.render('login', { error: 'Invalid credentials' });
-        }
-
-        // Create session
-        req.session.userId = user._id.toString();
-        req.session.username = user.username;
-        req.session.email = user.email;
+        // Store inside one user object
+        req.session.user = {
+          userId: user._id.toString(),
+          username: user.username,
+          email: user.email
+        };
 
         res.redirect('/dashboard');
       } catch (err) {
@@ -153,188 +110,116 @@ connectMongo()
       res.redirect('/login');
     });
 
-    // -------------------------
-    // DASHBOARD
-    // -------------------------
+    // ========== HOME ROUTE ==========
 
     app.get('/', (req, res) => {
-      if (!req.session.userId) return res.redirect('/login');
+      if (!req.session.user) return res.redirect('/login');
       res.redirect('/dashboard');
     });
+
+    // ========== DASHBOARD ==========
 
     app.get('/dashboard', requireLogin, async (req, res) => {
       try {
         const tasks = await Task.findAll({
-          where: { userId: req.session.userId.toString() }
+          where: { userId: req.session.user.userId }
         });
 
         const total = tasks.length;
-        const completed = tasks.filter(t => t.status === 'completed').length;
-        const pending = tasks.filter(t => t.status === 'pending').length;
+        const completed = tasks.filter(t => t.status === "completed").length;
+        const pending = total - completed;
 
         res.render('dashboard', { total, completed, pending });
       } catch (err) {
         console.error('Dashboard error:', err);
-        res.send('Error loading dashboard');
+        res.send("Dashboard error");
       }
     });
 
-    // -------------------------
-    // TASKS ROUTES
-    // -------------------------
+    // ========== TASK ROUTES ==========
 
-    // List tasks
     app.get('/tasks', requireLogin, async (req, res) => {
-      try {
-        const tasks = await Task.findAll({
-          where: { userId: req.session.userId.toString() }
-        });
-        res.render('tasks', { tasks });
-      } catch (err) {
-        console.error('Tasks list error:', err);
-        res.send('Error loading tasks');
-      }
+      const tasks = await Task.findAll({
+        where: { userId: req.session.user.userId }
+      });
+      res.render('tasks', { tasks });
     });
 
-    // Add new task (form)
     app.get('/tasks/add', requireLogin, (req, res) => {
+      res.render('task_form', { 
+        task: null, 
+        action: "/tasks/add", 
+        error: null 
+      });
+    });
+
+    app.post('/tasks/add', requireLogin, async (req, res) => {
+      const { title, description, dueDate, status } = req.body;
+
+      if (!title.trim()) {
+        return res.render('task_form', {
+          task: null,
+          action: "/tasks/add",
+          error: "Title required"
+        });
+      }
+
+      await Task.create({
+        title,
+        description,
+        dueDate,
+        status: status || "pending",
+        userId: req.session.user.userId
+      });
+
+      res.redirect('/tasks');
+    });
+
+    app.get('/tasks/edit/:id', requireLogin, async (req, res) => {
+      const task = await Task.findByPk(req.params.id);
+
+      if (!task || task.userId !== req.session.user.userId) 
+        return res.redirect('/tasks');
+
       res.render('task_form', {
-        task: null,
-        action: '/tasks/add',
+        task,
+        action: `/tasks/edit/${task.id}`,
         error: null
       });
     });
 
-    // Add task (submit)
-    app.post('/tasks/add', requireLogin, async (req, res) => {
-      const { title, description, dueDate, status } = req.body;
-
-      if (!title || title.trim() === '') {
-        return res.render('task_form', {
-          task: null,
-          action: '/tasks/add',
-          error: 'Title is required'
-        });
-      }
-
-      try {
-        await Task.create({
-          title: title.trim(),
-          description,
-          dueDate: dueDate || null,
-          status: status || 'pending',
-          userId: req.session.userId.toString()
-        });
-
-        res.redirect('/tasks');
-      } catch (err) {
-        console.error('Add task error:', err);
-
-        res.render('task_form', {
-          task: null,
-          action: '/tasks/add',
-          error: 'Failed to add task'
-        });
-      }
-    });
-
-    // Edit form
-    app.get('/tasks/edit/:id', requireLogin, async (req, res) => {
-      try {
-        const task = await Task.findByPk(req.params.id);
-
-        if (!task || task.userId !== req.session.userId.toString()) {
-          return res.redirect('/tasks');
-        }
-
-        res.render('task_form', {
-          task,
-          action: `/tasks/edit/${task.id}`,
-          error: null
-        });
-      } catch (err) {
-        console.error('Edit form error:', err);
-        res.redirect('/tasks');
-      }
-    });
-
-    // Edit submit
     app.post('/tasks/edit/:id', requireLogin, async (req, res) => {
       const { title, description, dueDate, status } = req.body;
 
-      try {
-        const task = await Task.findByPk(req.params.id);
+      const task = await Task.findByPk(req.params.id);
 
-        if (!task || task.userId !== req.session.userId.toString()) {
-          return res.redirect('/tasks');
-        }
+      if (!task || task.userId !== req.session.user.userId) 
+        return res.redirect('/tasks');
 
-        await task.update({
-          title: title.trim(),
-          description,
-          dueDate: dueDate || null,
-          status
-        });
+      await task.update({ title, description, dueDate, status });
 
-        res.redirect('/tasks');
-      } catch (err) {
-        console.error('Edit submit error:', err);
-
-        res.render('task_form', {
-          task: { id: req.params.id, title, description, dueDate, status },
-          action: `/tasks/edit/${req.params.id}`,
-          error: 'Failed to update task'
-        });
-      }
+      res.redirect('/tasks');
     });
 
-    // Delete task
     app.post('/tasks/delete/:id', requireLogin, async (req, res) => {
-      try {
-        const task = await Task.findByPk(req.params.id);
+      const task = await Task.findByPk(req.params.id);
 
-        if (task && task.userId === req.session.userId.toString()) {
-          await Task.destroy({ where: { id: req.params.id } });
-        }
-
-        res.redirect('/tasks');
-      } catch (err) {
-        console.error('Delete error:', err);
-        res.redirect('/tasks');
+      if (task && task.userId === req.session.user.userId) {
+        await Task.destroy({ where: { id: req.params.id } });
       }
+
+      res.redirect('/tasks');
     });
 
-    // Toggle task status
-    app.post('/tasks/status/:id', requireLogin, async (req, res) => {
-      try {
-        const task = await Task.findByPk(req.params.id);
+    // ========== START SERVER ==========
 
-        if (!task || task.userId !== req.session.userId.toString()) {
-          return res.redirect('/tasks');
-        }
-
-        task.status = task.status === 'pending' ? 'completed' : 'pending';
-        await task.save();
-
-        res.redirect('/tasks');
-      } catch (err) {
-        console.error('Status toggle error:', err);
-        res.redirect('/tasks');
-      }
+    sequelize.sync().then(() => {
+      const port = process.env.PORT || 3000;
+      app.listen(port, () =>
+        console.log(`Running at http://localhost:${port}`)
+      );
     });
 
-    // -------------------------
-    // START SERVER
-    // -------------------------
-
-    sequelize
-      .sync()
-      .then(() => {
-        const port = process.env.PORT || 3000;
-        app.listen(port, () =>
-          console.log(`Server running at http://localhost:${port}`)
-        );
-      })
-      .catch(err => console.error('PostgreSQL sync error:', err));
   })
-  .catch(err => console.error('MongoDB connection error:', err));
+  .catch(err => console.error("MongoDB error:", err));
+
