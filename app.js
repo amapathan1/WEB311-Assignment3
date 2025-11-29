@@ -34,11 +34,7 @@ app.use(
 
 // expose logged-in user to all views
 app.use((req, res, next) => {
-  if (req.session && req.session.user) {
-    res.locals.user = req.session.user;
-  } else {
-    res.locals.user = null;
-  }
+  res.locals.user = req.session?.user || null;
   next();
 });
 
@@ -62,7 +58,7 @@ app.get('/dashboard', requireLogin, async (req, res) => {
 
 // Root
 app.get('/', (req, res) => {
-  if (req.session && req.session.user) return res.redirect('/dashboard');
+  if (req.session?.user) return res.redirect('/dashboard');
   res.redirect('/login');
 });
 
