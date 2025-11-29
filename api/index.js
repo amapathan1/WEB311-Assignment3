@@ -1,4 +1,4 @@
-import { connectPostgres, sequelize } from './db';
+import { connectPostgres, getSequelize } from './db';
 import { connectMongo } from './config/mongo';
 import app from './app';
 
@@ -13,13 +13,13 @@ export default async function handler(req, res) {
       await connectMongo();
       console.log("Mongo connected");
 
+      const sequelize = getSequelize();
       await sequelize.sync();
       console.log("Sequelize models synced");
 
       isConnected = true;
     }
 
-    // Adapt Express to Vercel serverless function
     return new Promise((resolve, reject) => {
       app(req, res, (err) => {
         if (err) return reject(err);
