@@ -1,7 +1,6 @@
-// routes/auth.js
 const express = require('express');
 const bcrypt = require('bcrypt');
-const User = require('../models/user');
+const User = require('../models/User'); // Capitalized
 const { preventLoggedInAccess } = require('../middleware/auth');
 
 const router = express.Router();
@@ -19,6 +18,7 @@ router.post('/register', async (req, res) => {
     if (!username || !email || !password) {
       return res.render('register', { error: 'All fields are required' });
     }
+
     const exists = await User.findOne({ $or: [{ username }, { email }] });
     if (exists) return res.render('register', { error: 'Username or email already exists' });
 
@@ -26,7 +26,7 @@ router.post('/register', async (req, res) => {
     const user = new User({ username, email, password: hash });
     await user.save();
 
-    // set session
+    // Set session
     req.session.user = { userId: user._id.toString(), username: user.username, email: user.email };
     return res.redirect('/dashboard');
   } catch (err) {

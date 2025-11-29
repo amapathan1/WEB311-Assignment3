@@ -1,11 +1,10 @@
-// routes/tasks.js
 const express = require('express');
-const Task = require('../models/task');
+const Task = require('../models/Task'); // Capitalized
 const { requireLogin } = require('../middleware/auth');
 
 const router = express.Router();
 
-// GET /tasks  - list tasks
+// GET /tasks - list tasks
 router.get('/', requireLogin, async (req, res) => {
   try {
     const tasks = await Task.findAll({ where: { userId: req.session.user.userId }, order: [['createdAt', 'DESC']] });
@@ -83,7 +82,7 @@ router.post('/delete/:id', requireLogin, async (req, res) => {
   }
 });
 
-// POST /tasks/status/:id  (toggle)
+// POST /tasks/status/:id (toggle)
 router.post('/status/:id', requireLogin, async (req, res) => {
   try {
     const task = await Task.findByPk(req.params.id);
