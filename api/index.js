@@ -1,14 +1,11 @@
-// index.js — Vercel Serverless Entry
-
-import { connectPostgres, sequelize } from '../db';
-import { connectMongo } from '../config/mongo';
-import app from '../app';
+import { connectPostgres, sequelize } from './db';
+import { connectMongo } from './config/mongo';
+import app from './app';
 
 let isConnected = false;
 
 export default async function handler(req, res) {
   try {
-    // Avoid reconnecting on every request (serverless re-use optimization)
     if (!isConnected) {
       await connectPostgres();
       console.log("Postgres connected");
@@ -22,7 +19,7 @@ export default async function handler(req, res) {
       isConnected = true;
     }
 
-    // Run Express app inside Vercel function adapter
+    // Adapt Express to Vercel serverless function
     return new Promise((resolve, reject) => {
       app(req, res, (err) => {
         if (err) return reject(err);
@@ -31,7 +28,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error("Index.js handler error:", err);
+    console.error("Serverless handler error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 }

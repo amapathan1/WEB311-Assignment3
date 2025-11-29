@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const { connectPostgres, sequelize } = require('./db');
 const { connectMongo } = require('./config/mongo');

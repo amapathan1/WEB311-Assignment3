@@ -1,4 +1,3 @@
-// app.js
 const express = require('express');
 const path = require('path');
 const expressLayouts = require('express-ejs-layouts');
@@ -27,7 +26,7 @@ app.use(
   session({
     cookieName: 'session',
     secret: process.env.SESSION_SECRET || 'AnyRandomSecret',
-    duration: 30 * 60 * 1000, // 30 minutes
+    duration: 30 * 60 * 1000,
     activeDuration: 5 * 60 * 1000
   })
 );
@@ -42,7 +41,7 @@ app.use((req, res, next) => {
 app.use('/', authRoutes);
 app.use('/tasks', tasksRoutes);
 
-// Dashboard route (protected)
+// Dashboard route
 app.get('/dashboard', requireLogin, async (req, res) => {
   try {
     const tasks = await Task.findAll({ where: { userId: req.session.user.userId } });
