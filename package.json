@@ -6,9 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "vercel-build": "npm install && echo Build done"
+    "vercel-build": "npm install"
   },
-
   "dependencies": {
     "bcrypt": "^5.1.0",
     "client-sessions": "^0.8.0",
