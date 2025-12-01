@@ -31,4 +31,8 @@ async function connectPostgres() {
   }
 }
 
-module.exports = { getSequelize, connectPostgres };
+module.exports = {
+  getSequelize,
+  connectPostgres,
+  sequelize: getSequelize()     // 🔥 ADD THIS
+};
