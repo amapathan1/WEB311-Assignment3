@@ -1,88 +1,66 @@
-// api/index.js - CORRECTED VERSION (CommonJS)
-const { connectPostgres, getSequelize } = require('./db');
-const { connectMongo } = require('./config/mongo');
+// api/index.js - FIXED VERSION
 const app = require('./app');
 
-let isConnected = false;
+let isInitialized = false;
 
 module.exports = async function handler(req, res) {
   try {
-    // Only connect on cold start
-    if (!isConnected) {
-      console.log("Cold start - initializing databases...");
+    // Lazy initialization - only on first request
+    if (!isInitialized) {
+      console.log('Initializing application...');
       
-      // Connect to PostgreSQL with timeout
-      await Promise.race([
-        connectPostgres(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('PostgreSQL connection timeout')), 5000)
-        )
-      ]);
-      
-      // Connect to MongoDB with timeout
-      await Promise.race([
-        connectMongo(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('MongoDB connection timeout')), 5000)
-        )
-      ]);
-      
-      // Sync Sequelize models (skip in production to avoid auto-creating tables)
-      if (process.env.NODE_ENV !== 'production') {
-        const sequelize = getSequelize();
-        await sequelize.sync();
-        console.log("Sequelize models synced");
+      // Try to connect to databases, but don't crash if they fail
+      try {
+        const { connectPostgres } = require('./db');
+        const { connectMongo } = require('./config/mongo');
+        
+        // Connect to databases with timeout
+        await Promise.race([
+          Promise.allSettled([
+            connectPostgres(),
+            connectMongo()
+          ]),
+          new Promise(resolve => setTimeout(resolve, 5000))
+        ]);
+        
+        console.log('Database initialization attempted');
+      } catch (dbErr) {
+        console.warn('Database initialization warning:', dbErr.message);
+        // Continue even if databases fail
       }
       
-      isConnected = true;
-      console.log("All databases connected and ready");
+      isInitialized = true;
     }
-
+    
     // Handle the request
     return app(req, res);
-  } catch (err) {
-    console.error("Serverless handler error:", err);
     
-    // Return user-friendly error page
+  } catch (err) {
+    console.error('Handler error:', err.message);
+    
+    // Send a proper error response
     if (!res.headersSent) {
-      if (req.headers.accept && req.headers.accept.includes('text/html')) {
-        res.status(500).send(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Server Error</title>
-              <style>
-                body { font-family: sans-serif; padding: 40px; text-align: center; }
-                h1 { color: #dc3545; }
-                .error-details { 
-                  display: ${process.env.NODE_ENV === 'development' ? 'block' : 'none'};
-                  background: #f8f9fa; 
-                  padding: 20px; 
-                  margin: 20px 0; 
-                  border-radius: 5px; 
-                  text-align: left;
-                  font-family: monospace;
-                }
-              </style>
-            </head>
-            <body>
-              <h1>500 - Server Error</h1>
-              <p>Sorry, something went wrong. Please try again later.</p>
-              ${process.env.NODE_ENV === 'development' ? 
-                `<div class="error-details">
-                  <strong>Error:</strong> ${err.message}<br>
-                  <strong>Time:</strong> ${new Date().toISOString()}
-                </div>` : ''}
-              <p><a href="/">Go to homepage</a></p>
-            </body>
-          </html>
-        `);
-      } else {
-        res.status(500).json({ 
-          error: "Internal server error",
-          message: process.env.NODE_ENV === 'development' ? err.message : undefined
-        });
-      }
+      res.status(500).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Server Error</title>
+          <style>
+            body { font-family: sans-serif; padding: 40px; text-align: center; }
+            h1 { color: #dc3545; }
+            .error { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 5px; }
+          </style>
+        </head>
+        <body>
+          <h1>Server Error</h1>
+          <p>Something went wrong. Please try again later.</p>
+          <div class="error">
+            <strong>Error:</strong> ${err.message}<br>
+            <strong>Time:</strong> ${new Date().toISOString()}
+          </div>
+        </body>
+        </html>
+      `);
     }
   }
 };
